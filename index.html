@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Librarium — Book Inventory</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cream: #F5F0E8;
+      --paper: #EDE7D9;
+      --warm-white: #FAF8F3;
+      --ink: #1A1612;
+      --ink-muted: #4A4035;
+      --ink-faint: #8C7E6E;
+      --amber: #C8873A;
+      --amber-light: #E8A855;
+      --amber-pale: #F5DFB8;
+      --teal: #2A6B6B;
+      --teal-light: #3D9B8C;
+      --red: #B5413A;
+      --border: #D4C9B5;
+      --border-light: #E8DFD0;
+      --shadow: rgba(26, 22, 18, 0.08);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Mono', monospace;
+      background-color: var(--cream);
+      color: var(--ink);
+      min-height: 100vh;
+      background-image:
+        radial-gradient(ellipse at 0% 0%, rgba(200, 135, 58, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse at 100% 100%, rgba(42, 107, 107, 0.05) 0%, transparent 60%);
+    }
+
+    /* ── Noise texture overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-size: 128px;
+      z-index: 9999;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--warm-white);
+      padding: 0 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 12px var(--shadow);
+    }
+
+    .logo {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    .logo-mark {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.7rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .logo-mark span {
+      color: var(--amber);
+    }
+
+    .logo-sub {
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      padding-bottom: 2px;
+    }
+
+    .header-stat {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .stat-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: var(--ink-muted);
+      background: var(--paper);
+      border: 1px solid var(--border-light);
+      border-radius: 100px;
+      padding: 0.3rem 0.75rem;
+    }
+
+    .stat-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .dot-available { background: var(--teal-light); }
+    .dot-issued { background: var(--amber); }
+
+    /* ── Layout ── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2.5rem 2rem 4rem;
+    }
+
+    /* ── Page Title ── */
+    .page-header {
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+    }
+
+    .page-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 2.8rem;
+      font-weight: 300;
+      line-height: 1.05;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+    }
+
+    .page-title em {
+      font-style: italic;
+      color: var(--amber);
+    }
+
+    .page-subtitle {
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin-top: 0.4rem;
+    }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .toast {
+      background: var(--ink);
+      color: var(--cream);
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      padding: 0.75rem 1.1rem;
+      border-radius: 6px;
+      border-left: 3px solid var(--amber);
+      max-width: 280px;
+      animation: toastIn 0.3s ease forwards;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    }
+
+    .toast.error { border-left-color: var(--red); }
+    .toast.success { border-left-color: var(--teal-light); }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(-8px); }
+    }
+
+    /* ── Add Book Form ── */
+    .form-card {
+      background: var(--warm-white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.75rem;
+      box-shadow: 0 2px 16px var(--shadow);
+    }
+
+    .form-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      display: block;
+      margin-bottom: 0.35rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 0.8rem;
+      align-items: end;
+    }
+
+    .form-group { display: flex; flex-direction: column; }
+
+    .form-input {
+      background: var(--cream);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 0.85rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.82rem;
+      color: var(--ink);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .form-input::placeholder { color: var(--ink-faint); }
+
+    .form-input:focus {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 3px rgba(200, 135, 58, 0.12);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: var(--amber);
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--amber-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(200,135,58,0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Search & Filter Bar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      margin-bottom: 1rem;
+    }
+
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--ink-faint);
+      pointer-events: none;
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--warm-white);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.55rem 0.85rem 0.55rem 2.3rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--ink);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-input::placeholder { color: var(--ink-faint); }
+    .search-input:focus { border-color: var(--amber); }
+
+    .filter-btn {
+      padding: 0.5rem 0.9rem;
+      border-radius: 6px;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--warm-white);
+      color: var(--ink-muted);
+      transition: all 0.18s;
+    }
+
+    .filter-btn:hover, .filter-btn.active {
+      background: var(--amber-pale);
+      border-color: var(--amber);
+      color: var(--ink);
+    }
+
+    /* ── Table ── */
+    .table-card {
+      background: var(--warm-white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 16px var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      background: var(--paper);
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      font-size: 0.58rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      font-weight: 500;
+      padding: 0.85rem 1.2rem;
+      text-align: left;
+    }
+
+    th:last-child { text-align: right; }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border-light);
+      transition: background 0.15s;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(245,240,232,0.6); }
+
+    td {
+      padding: 0.95rem 1.2rem;
+      font-size: 0.8rem;
+      color: var(--ink);
+      vertical-align: middle;
+    }
+
+    .td-id {
+      font-size: 0.65rem;
+      color: var(--ink-faint);
+      font-weight: 300;
+    }
+
+    .td-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.05rem;
+      font-weight: 400;
+      color: var(--ink);
+    }
+
+    .td-author {
+      font-size: 0.75rem;
+      color: var(--ink-muted);
+      font-style: italic;
+    }
+
+    .td-date {
+      font-size: 0.68rem;
+      color: var(--ink-faint);
+    }
+
+    /* Status badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 100px;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .badge-available {
+      background: rgba(42,107,107,0.08);
+      color: var(--teal);
+      border-color: rgba(42,107,107,0.2);
+    }
+
+    .badge-available:hover {
+      background: rgba(42,107,107,0.15);
+      transform: translateY(-1px);
+    }
+
+    .badge-issued {
+      background: rgba(200,135,58,0.1);
+      color: #9A6020;
+      border-color: rgba(200,135,58,0.25);
+    }
+
+    .badge-issued:hover {
+      background: rgba(200,135,58,0.18);
+      transform: translateY(-1px);
+    }
+
+    .badge.loading {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    /* Actions */
+    .actions-cell {
+      text-align: right;
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4rem;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      border: 1px solid var(--border-light);
+      background: transparent;
+      cursor: pointer;
+      color: var(--ink-faint);
+      transition: all 0.18s;
+    }
+
+    .icon-btn:hover {
+      background: #FDF0EE;
+      border-color: #E0A09A;
+      color: var(--red);
+    }
+
+    .icon-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: var(--ink-faint);
+    }
+
+    .empty-icon {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 3.5rem;
+      font-style: italic;
+      font-weight: 300;
+      color: var(--border);
+      margin-bottom: 0.75rem;
+    }
+
+    .empty-title {
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+
+    /* ── Loading skeleton ── */
+    .skeleton-row td {
+      padding: 1rem 1.2rem;
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, var(--paper) 25%, var(--border-light) 50%, var(--paper) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+      height: 14px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton.sm { width: 40%; }
+    .skeleton.md { width: 65%; }
+    .skeleton.lg { width: 85%; }
+
+    /* ── Delete confirm modal ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(26,22,18,0.45);
+      backdrop-filter: blur(3px);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal {
+      background: var(--warm-white);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      max-width: 380px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      transform: scale(0.96) translateY(8px);
+      transition: transform 0.25s;
+    }
+
+    .modal-backdrop.open .modal {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.4rem;
+      font-weight: 400;
+      color: var(--ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .modal-body {
+      font-size: 0.75rem;
+      color: var(--ink-muted);
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+
+    .modal-body strong {
+      color: var(--ink);
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 0.95rem;
+      font-style: italic;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 0.6rem;
+      justify-content: flex-end;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--ink-muted);
+    }
+
+    .btn-ghost:hover { background: var(--paper); }
+
+    .btn-danger {
+      background: var(--red);
+      color: white;
+    }
+
+    .btn-danger:hover:not(:disabled) { background: #C8473F; transform: translateY(-1px); }
+    .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Connection banner ── */
+    #connection-banner {
+      background: var(--amber-pale);
+      border-bottom: 1px solid rgba(200,135,58,0.3);
+      padding: 0.6rem 2.5rem;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      color: #7A5010;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    #connection-banner.show { display: flex; }
+
+    /* ── Table count ── */
+    .table-footer {
+      padding: 0.7rem 1.2rem;
+      border-top: 1px solid var(--border-light);
+      background: var(--paper);
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    @media (max-width: 768px) {
+      header { padding: 0 1rem; }
+      main { padding: 1.5rem 1rem 3rem; }
+      .form-row { grid-template-columns: 1fr; }
+      .page-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+      .toolbar { flex-wrap: wrap; }
+      th:nth-child(1), td:nth-child(1) { display: none; }
+      th:nth-child(4), td:nth-child(4) { display: none; }
+      .header-stat { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Connection Banner -->
+<div id="connection-banner">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  Supabase not configured — running with demo data. Add your keys to connect a live database.
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">Libr<span>a</span>rium</div>
+    <div class="logo-sub">Book Inventory</div>
+  </div>
+  <div class="header-stat">
+    <div class="stat-pill"><span class="stat-dot dot-available"></span><span id="stat-available">– available</span></div>
+    <div class="stat-pill"><span class="stat-dot dot-issued"></span><span id="stat-issued">– issued</span></div>
+  </div>
+</header>
+
+<!-- Main -->
+<main>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Book <em>Inventory</em></h1>
+      <div class="page-subtitle">Manage your collection</div>
+    </div>
+  </div>
+
+  <!-- Add Book Form -->
+  <div class="form-card">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="input-title">Book Title</label>
+        <input class="form-input" type="text" id="input-title" placeholder="e.g. Atomic habits" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="input-author">Author</label>
+        <input class="form-input" type="text" id="input-author" placeholder="e.g. James Clear" />
+      </div>
+      <button class="btn btn-primary" id="btn-add">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Book
+      </button>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </span>
+      <input class="search-input" type="text" id="search-input" placeholder="Search by title or author…" />
+    </div>
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="Available">Available</button>
+    <button class="filter-btn" data-filter="Issued">Issued</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Title</th>
+          <th>Author</th>
+          <th>Added</th>
+          <th>Status</th>
+          <th style="text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="book-tbody">
+        <!-- Rows inserted by JS -->
+      </tbody>
+    </table>
+    <div class="table-footer">
+      <span id="count-text">Loading…</span>
+      <span>Librarium v1.0</span>
+    </div>
+  </div>
+</main>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-backdrop" id="delete-modal">
+  <div class="modal">
+    <div class="modal-title">Remove Book</div>
+    <div class="modal-body">Are you sure you want to permanently remove <strong id="modal-book-name"></strong> from the inventory? This action cannot be undone.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn btn-danger" id="modal-confirm">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<script>
+  // ═══════════════════════════════════════════════════
+  // ██  CONFIGURATION — ADD YOUR SUPABASE KEYS HERE  ██
+  // ═══════════════════════════════════════════════════
+  const SUPABASE_URL  = "https://oeeanfcltliwxlobmafh.supabase.co";   // 🔑 Replace this
+  const SUPABASE_ANON = "sb_publishable_43_lFi_IFgsswPzFBB4N0A_b3076sj9"; // 🔑 Replace this
+  // ═══════════════════════════════════════════════════
+
+  const DEMO_MODE = !SUPABASE_URL || SUPABASE_URL === "YOUR_SUPABASE_URL";
+
+  // ── Init Supabase (only if keys are set) ──
+  //let supabase = null;
+  if (!DEMO_MODE) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  }
+
+  // ── Demo seed data ──
+  let demoBooks = [
+    { id: 1, title: "One Hundred Years of Solitude", author: "Gabriel García Márquez", status: "Available", created_at: new Date(Date.now() - 8640000 * 5).toISOString() },
+    { id: 2, title: "Beloved",                       author: "Toni Morrison",           status: "Issued",    created_at: new Date(Date.now() - 8640000 * 3).toISOString() },
+    { id: 3, title: "The Master and Margarita",       author: "Mikhail Bulgakov",        status: "Available", created_at: new Date(Date.now() - 8640000 * 2).toISOString() },
+    { id: 4, title: "Middlemarch",                    author: "George Eliot",            status: "Issued",    created_at: new Date(Date.now() - 8640000 * 1).toISOString() },
+  ];
+  let demoNextId = 5;
+
+  // ── App state ──
+  let allBooks = [];
+  let filterMode = "all";
+  let searchTerm = "";
+  let pendingDeleteId = null;
+  let pendingDeleteName = "";
+
+  // ═══════════════════════════
+  //  Toast helper
+  // ═══════════════════════════
+  function toast(msg, type = "info") {
+    const el = document.createElement("div");
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    document.getElementById("toast-container").appendChild(el);
+    setTimeout(() => {
+      el.style.animation = "toastOut 0.3s ease forwards";
+      setTimeout(() => el.remove(), 300);
+    }, 3000);
+  }
+
+  // ═══════════════════════════
+  //  Format date
+  // ═══════════════════════════
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  }
+
+  // ═══════════════════════════
+  //  Update header stats
+  // ═══════════════════════════
+  function updateStats() {
+    const avail = allBooks.filter(b => b.status === "Available").length;
+    const issued = allBooks.filter(b => b.status === "Issued").length;
+    document.getElementById("stat-available").textContent = `${avail} available`;
+    document.getElementById("stat-issued").textContent    = `${issued} issued`;
+  }
+
+  // ═══════════════════════════
+  //  Render table
+  // ═══════════════════════════
+  function render() {
+    const tbody = document.getElementById("book-tbody");
+    let books = [...allBooks];
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      books = books.filter(b => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
+    }
+    if (filterMode !== "all") {
+      books = books.filter(b => b.status === filterMode);
+    }
+
+    if (books.length === 0) {
+      tbody.innerHTML = `
+        <tr><td colspan="6">
+          <div class="empty-state">
+            <div class="empty-icon">∅</div>
+            <div class="empty-title">${allBooks.length === 0 ? "No books in inventory" : "No results found"}</div>
+          </div>
+        </td></tr>`;
+      document.getElementById("count-text").textContent = "0 books";
+      return;
+    }
+
+    tbody.innerHTML = books.map(b => `
+      <tr data-id="${b.id}">
+        <td class="td-id">${String(b.id).padStart(3, "0")}</td>
+        <td class="td-title">${escHtml(b.title)}</td>
+        <td class="td-author">${escHtml(b.author)}</td>
+        <td class="td-date">${fmtDate(b.created_at)}</td>
+        <td>
+          <span class="badge badge-${b.status === 'Available' ? 'available' : 'issued'}"
+                onclick="toggleStatus(${b.id})" title="Click to toggle">
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${b.status === 'Available' ? 'var(--teal-light)' : 'var(--amber)'}"></span>
+            ${b.status}
+          </span>
+        </td>
+        <td>
+          <div class="actions-cell">
+            <button class="icon-btn" onclick="confirmDelete(${b.id}, '${escAttr(b.title)}')" title="Delete book">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `).join("");
+
+    document.getElementById("count-text").textContent = `${books.length} of ${allBooks.length} book${allBooks.length !== 1 ? "s" : ""}`;
+    updateStats();
+  }
+
+  function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function escAttr(s) { return String(s).replace(/'/g,"\\'"); }
+
+  // ═══════════════════════════
+  //  Skeleton loader
+  // ═══════════════════════════
+  function showSkeleton() {
+    const tbody = document.getElementById("book-tbody");
+    tbody.innerHTML = [1,2,3].map(() => `
+      <tr class="skeleton-row">
+        <td><div class="skeleton sm"></div></td>
+        <td><div class="skeleton lg"></div></td>
+        <td><div class="skeleton md"></div></td>
+        <td><div class="skeleton sm"></div></td>
+        <td><div class="skeleton sm"></div></td>
+        <td><div class="skeleton sm"></div></td>
+      </tr>`).join("");
+  }
+
+  // ═══════════════════════════
+  //  Fetch all books
+  // ═══════════════════════════
+  async function fetchBooks() {
+    showSkeleton();
+    if (DEMO_MODE) {
+      await delay(600);
+      allBooks = [...demoBooks];
+      render();
+      return;
+    }
+    try {
+      const { data, error } = await supabase.from("books").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      allBooks = data;
+      render();
+    } catch (e) {
+      toast("Failed to load books: " + e.message, "error");
+      allBooks = [];
+      render();
+    }
+  }
+
+  // ═══════════════════════════
+  //  Add book
+  // ═══════════════════════════
+  async function addBook() {
+    const titleEl  = document.getElementById("input-title");
+    const authorEl = document.getElementById("input-author");
+    const btn      = document.getElementById("btn-add");
+    const title    = titleEl.value.trim();
+    const author   = authorEl.value.trim();
+
+    if (!title) { toast("Please enter a book title.", "error"); titleEl.focus(); return; }
+    if (!author) { toast("Please enter an author name.", "error"); authorEl.focus(); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.8s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Adding…`;
+
+    if (DEMO_MODE) {
+      await delay(500);
+      const newBook = { id: demoNextId++, title, author, status: "Available", created_at: new Date().toISOString() };
+      demoBooks.unshift(newBook);
+      allBooks.unshift(newBook);
+      render();
+      toast(`"${title}" added successfully.`, "success");
+    } else {
+      try {
+        const { data, error } = await supabase.from("books").insert([{ title, author, status: "Available" }]).select().single();
+        if (error) throw error;
+        allBooks.unshift(data);
+        render();
+        toast(`"${title}" added to inventory.`, "success");
+      } catch (e) {
+        toast("Add failed: " + e.message, "error");
+      }
+    }
+
+    titleEl.value = "";
+    authorEl.value = "";
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Book`;
+  }
+
+  // ═══════════════════════════
+  //  Toggle status
+  // ═══════════════════════════
+  async function toggleStatus(id) {
+    const book = allBooks.find(b => b.id === id);
+    if (!book) return;
+    const newStatus = book.status === "Available" ? "Issued" : "Available";
+    const badge = document.querySelector(`tr[data-id="${id}"] .badge`);
+    if (badge) badge.classList.add("loading");
+
+    if (DEMO_MODE) {
+      await delay(400);
+      book.status = newStatus;
+      const idx = demoBooks.findIndex(b => b.id === id);
+      if (idx > -1) demoBooks[idx].status = newStatus;
+    } else {
+      try {
+        const { error } = await supabase.from("books").update({ status: newStatus }).eq("id", id);
+        if (error) throw error;
+        book.status = newStatus;
+      } catch (e) {
+        toast("Update failed: " + e.message, "error");
+        if (badge) badge.classList.remove("loading");
+        return;
+      }
+    }
+    render();
+    toast(`Marked as ${newStatus}.`);
+  }
+
+  // ═══════════════════════════
+  //  Delete flow
+  // ═══════════════════════════
+  function confirmDelete(id, name) {
+    pendingDeleteId   = id;
+    pendingDeleteName = name;
+    document.getElementById("modal-book-name").textContent = name;
+    document.getElementById("delete-modal").classList.add("open");
+  }
+
+  async function executeDelete() {
+    const id  = pendingDeleteId;
+    const btn = document.getElementById("modal-confirm");
+    btn.disabled = true;
+    btn.textContent = "Deleting…";
+
+    if (DEMO_MODE) {
+      await delay(500);
+      demoBooks = demoBooks.filter(b => b.id !== id);
+      allBooks  = allBooks.filter(b => b.id !== id);
+    } else {
+      try {
+        const { error } = await supabase.from("books").delete().eq("id", id);
+        if (error) throw error;
+        allBooks = allBooks.filter(b => b.id !== id);
+      } catch (e) {
+        toast("Delete failed: " + e.message, "error");
+        btn.disabled = false;
+        btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete`;
+        closeModal();
+        return;
+      }
+    }
+
+    render();
+    toast(`"${pendingDeleteName}" removed.`, "success");
+    closeModal();
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete`;
+  }
+
+  function closeModal() {
+    document.getElementById("delete-modal").classList.remove("open");
+    pendingDeleteId = null;
+  }
+
+  // ═══════════════════════════
+  //  Helpers
+  // ═══════════════════════════
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // ═══════════════════════════
+  //  Event listeners
+  // ═══════════════════════════
+  document.getElementById("btn-add").addEventListener("click", addBook);
+
+  document.getElementById("input-title").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("input-author").focus(); });
+  document.getElementById("input-author").addEventListener("keydown", e => { if (e.key === "Enter") addBook(); });
+
+  document.getElementById("search-input").addEventListener("input", e => {
+    searchTerm = e.target.value;
+    render();
+  });
+
+  document.querySelectorAll(".filter-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      filterMode = btn.dataset.filter;
+      render();
+    });
+  });
+
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-confirm").addEventListener("click", executeDelete);
+  document.getElementById("delete-modal").addEventListener("click", e => { if (e.target === e.currentTarget) closeModal(); });
+
+  // ═══════════════════════════
+  //  Boot
+  // ═══════════════════════════
+  if (DEMO_MODE) {
+    document.getElementById("connection-banner").classList.add("show");
+  }
+
+  // Spinner keyframe (injected)
+  const style = document.createElement("style");
+  style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+  document.head.appendChild(style);
+
+  fetchBooks();
+</script>
+</body>
+</html>
